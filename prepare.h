@@ -14,6 +14,7 @@
 #define TRACKING_PREPARE_H
 
 #include "common.h"
+#include "maxflow/graph.h"
 #include <math.h>
 #include <map>
 #include <vector>
