@@ -89,10 +89,11 @@ int main()
     cap.set(CV_CAP_PROP_FPS, 30);
 
     prepare* pp;
+    cv::Mat mask;
     while(cap.grab()){
 
         cap >> img;
-        cv::Mat mask;
+
 
         if (g_bDrawingBox){
 
@@ -107,13 +108,11 @@ int main()
             mask = cv::Mat::zeros(img.size(), CV_8UC1);
             cv::Mat I(g_rectangle.size(), CV_8UC1, cv::Scalar::all(255));
             I.copyTo( mask(g_rectangle) );
-//            std::cout << mask << std::endl;
-
-//            cv::imshow("mask", mask);
+            cv::imshow("mask_initial", mask);
         }
-        
-        if (!initialize) {
-            pp = new prepare(mask);
+
+        if (!initialize && !mask.empty() && !g_bDrawingBox) {
+            pp = new prepare(img, mask);
             initialize = true;
         }
 

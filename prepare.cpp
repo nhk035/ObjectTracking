@@ -8,22 +8,67 @@
 using namespace std;
 using namespace cv;
 
-prepare::prepare(const cv::Mat _mask) :  mask(_mask) {
+prepare::prepare(const cv::Mat _image, const cv::Mat _mask) : mask(_mask) {
+
+    CV_Assert(_image.rows == IMAGE_HEIGHT && _image.cols == IMAGE_WIDTH);
+
+    //距离变换
+//    threshold(mask, mask, 100, 255, THRESH_BINARY);
+    //计算图像中每一个非零点距离离自己最近的零点的距离
+    distanceTransform(~mask, distanceImage, CV_DIST_L2, CV_DIST_MASK_PRECISE);
+
+    if (_image.channels() != 1)
+        cvtColor(_image, image, COLOR_BGR2GRAY);
+
+    cv::Mat hsvImage;
+    cvtColor(_image, hsvImage, COLOR_BGR2HSV);
+    image.create(hsvImage.size(), hsvImage.depth());
+    int ch[] = {0, 0};
+    mixChannels(&hsvImage, 1, &image, 1, ch, 1);
 
 
-    image = cv::Mat::zeros(IMAGE_HEIGHT, IMAGE_WIDTH, CV_8UC1);
+    //计算直方图
+    cv::calcHist(&image, 1, &channels, mask, objHist, dims, &size, ranges);
+    cv::calcHist(&image, 1, &channels, ~mask, bkgHist, dims, &size, ranges);
+    normalize(objHist, objHist, 0, 255, NORM_MINMAX, -1, Mat());
+    normalize(bkgHist, bkgHist, 0, 255, NORM_MINMAX, -1, Mat());
 
-    timeval time1, time2;
-    gettimeofday(&time1, NULL);
+    ///直方图显示
+//    int scale = 1;
+//    Mat dstImage(size * scale, size, CV_8U, Scalar(0));
+//    //获取最大最小值
+//    double minValue = 0, maxValue = 0;
+//    minMaxLoc(objHist, &minValue, &maxValue, 0, 0);
+//    cout << minValue << " " << maxValue << endl;
+//    int hpt = saturate_cast<int>(0.9 * size);
+//    for (int i = 0; i < 256; i++) {
+//        float binValue = objHist.at<float>(i);
+//        int realValue = saturate_cast<int>(binValue * hpt / maxValue);
+//        rectangle(dstImage, Point(i*scale, size-1), Point((i+1)*scale - 1, size - realValue), Scalar(255));
+//    }
+//    imshow("Hist", dstImage);
+
+
+//    Mat image_obj, image_bkg;
+//    image.copyTo(image_obj, mask);
+//    image.copyTo(image_bkg, ~mask);
+
+
+//    timeval time1, time2;
+//    gettimeofday(&time1, NULL);
     generatePairs();
-    gettimeofday(&time2, NULL);
-    cerr << "compute neighbor pair cost: " << time2.tv_sec - time1.tv_sec + 0.000001*(time2.tv_usec - time1.tv_usec) << " s" << endl;
+//    gettimeofday(&time2, NULL);
+//    cerr << "compute neighbor pair cost: " << time2.tv_sec - time1.tv_sec + 0.000001*(time2.tv_usec - time1.tv_usec) << " s" << endl;
+
+    g = new GraphType(/*estimated # of nodes*/ IMAGE_WIDTH*IMAGE_HEIGHT, /*estimated # of edges*/ pairs.size());
+
+    g -> add_node(IMAGE_WIDTH*IMAGE_HEIGHT);
 }
 
 
 
 prepare::~prepare() {
-
+    delete g;
 }
 
 int prepare::getNodeId(int row, int col){
@@ -169,84 +214,87 @@ void prepare::update(const cv::Mat img) {
 
     assert(IMAGE_WIDTH == img.cols && IMAGE_HEIGHT == img.rows);
 //    img.convertTo(image, cv::COLOR_BGR2GRAY);//注意这里的颜色顺序
-    cvtColor(img, image, COLOR_BGR2GRAY);
+    if (1 != img.channels())
+        cvtColor(img, image, COLOR_BGR2GRAY);
+    //使用hue色调通道数据
+    cv::Mat hsvImage;
+    cvtColor(img, hsvImage, COLOR_BGR2HSV);
+    image.create(hsvImage.size(), hsvImage.depth());
+    int ch[] = {0, 0};
+    mixChannels(&hsvImage, 1, &image, 1, ch, 1);
 
-
-    //计算直方图
-    int channels = 0;
-    MatND objHist, bkgHist;
-    int dims = 1;
-    int size = 256;
-    float hranges[] = {0, 255};
-    const float* ranges[] = {hranges};
-    cv::calcHist(&image, 1, &channels, mask, objHist, dims, &size, ranges);
-    cv::calcHist(&image, 1, &channels, ~mask, bkgHist, dims, &size, ranges);
-    normalize(objHist, objHist, 0, 255, NORM_MINMAX, -1, Mat());
-    normalize(bkgHist, bkgHist, 0, 255, NORM_MINMAX, -1, Mat());
-
-    ///直方图显示
-//    int scale = 1;
-//    Mat dstImage(size * scale, size, CV_8U, Scalar(0));
-//    //获取最大最小值
-//    double minValue = 0, maxValue = 0;
-//    minMaxLoc(objHist, &minValue, &maxValue, 0, 0);
-//    int hpt = saturate_cast<int>(0.9 * size);
-//    for (int i = 0; i < 256; i++) {
-//        float binValue = objHist.at<float>(i);
-//        int realValue = saturate_cast<int>(binValue * hpt / maxValue);
-//        rectangle(dstImage, Point(i*scale, size-1), Point((i+1)*scale - 1, size - realValue), Scalar(255));
-//    }
-//    imshow("Hist", dstImage);
-
-
-//    Mat image_obj, image_bkg;
-//    image.copyTo(image_obj, mask);
-//    image.copyTo(image_bkg, ~mask);
     //计算反向投影图
     MatND backproj_obj, backproj_bkg;
     calcBackProject(&image, 1, &channels, objHist, backproj_obj, ranges,  1, true);
     calcBackProject(&image, 1, &channels, bkgHist, backproj_bkg, ranges,  1, true);
 
 
-    imshow("object反向投影图", backproj_obj);
-    imshow("background反向投影图", backproj_bkg);
-    waitKey(10);
+//    imshow("object反向投影图", backproj_obj);
+//    imshow("background反向投影图", backproj_bkg);
 
-    timeval time1, time2;
-    gettimeofday(&time1, NULL);
+//    waitKey(10);
+
+//    timeval time1, time2;
+//    gettimeofday(&time1, NULL);
+    nLinks.clear();
     computeBoundaryTerm();
-    gettimeofday(&time2, NULL);
-    cout << "compute boundary term cost: " << time2.tv_sec - time1.tv_sec + 0.000001*(time2.tv_usec - time1.tv_usec) << endl;
+//    gettimeofday(&time2, NULL);
+//    cerr << "compute boundary term cost: " << time2.tv_sec - time1.tv_sec + 0.000001*(time2.tv_usec - time1.tv_usec) << endl;
 
+    g->reset();
+    g->add_node(IMAGE_WIDTH*IMAGE_HEIGHT);
 
-    typedef Graph<float,float,float> GraphType;
-    GraphType *g = new GraphType(/*estimated # of nodes*/ IMAGE_WIDTH*IMAGE_HEIGHT, /*estimated # of edges*/ pairs.size());
+//    double minValue = 0, maxValue = 0;
+//    minMaxLoc(distanceImage, &minValue, &maxValue, NULL, NULL);
 
-    for (int i = 0; i < IMAGE_WIDTH*IMAGE_HEIGHT; ++i) {
+    for (int i = 0; i < IMAGE_HEIGHT; ++i) {
+        uchar* objData = backproj_obj.ptr<uchar>(i);
+        uchar* bkgData = backproj_bkg.ptr<uchar>(i);
+        float* disData = distanceImage.ptr<float>(i);
+        for (int j = 0; j < IMAGE_WIDTH; ++j) {
 
-        g -> add_node();
-        g -> add_tweights( i,   /* capacities */  backproj_obj.at<uchar>(i), backproj_bkg.at<uchar>(i) );
+            cerr << disData[j] << endl;
+            double S = (objData[j] == 0 ? 6. : -log(objData[j]/255.0)) + disData[j];
+            double T = (bkgData[j] == 0 ? 6. : -log(bkgData[j]/255.0));
+            g -> add_tweights( i * IMAGE_WIDTH + j,   /* capacities */  S, T );
+        }
     }
+
+//    timeval time1, time2;
+//    gettimeofday(&time1, NULL);
+//    for (int i = 0; i < IMAGE_WIDTH*IMAGE_HEIGHT; ++i) {
+//
+//        double S = (backproj_obj.at<uchar>(i) == 0 ? 6. : -log(backproj_obj.at<uchar>(i)/255.0));
+//        double T = (backproj_bkg.at<uchar>(i) == 0 ? 6. : -log(backproj_bkg.at<uchar>(i)/255.0));
+//        g -> add_tweights( i,   /* capacities */  S, T );
+//    }
+//    gettimeofday(&time2, NULL);
+//    cerr << "go through all pixel cost: " << time2.tv_sec - time1.tv_sec + 0.000001*(time2.tv_usec - time1.tv_usec) << endl;
+
+//    timeval time3, time4;
+//    gettimeofday(&time3, NULL);
     for (int j = 0; j < nLinks.size(); ++j) {
-        g -> add_edge( nLinks[j].first.id, nLinks[j].second.id,    /* capacities */ nLinks[j].weight, nLinks[j].weight );
+        g -> add_edge( nLinks[j].first.id, nLinks[j].second.id,    /* capacities */ 6*nLinks[j].weight, 6*nLinks[j].weight );
     }
+//    gettimeofday(&time4, NULL);
+//    cerr << "add edge cost: " << time4.tv_sec - time3.tv_sec + 0.000001*(time4.tv_usec - time3.tv_usec) << endl;
 
+
+//    timeval time3, time4;
+//    gettimeofday(&time3, NULL);
     float flow = g -> maxflow();
+//    gettimeofday(&time4, NULL);
+//    cerr << "compute max flow cost: " << time4.tv_sec - time3.tv_sec + 0.000001*(time4.tv_usec - time3.tv_usec) << endl;
+
+
 
     printf("Flow = %f\n", flow);
     printf("Minimum cut:\n");
-    if (g->what_segment(0) == GraphType::SOURCE)
-        printf("node0 is in the SOURCE set\n");
-    else
-        printf("node0 is in the SINK set\n");
-    if (g->what_segment(1) == GraphType::SOURCE)
-        printf("node1 is in the SOURCE set\n");
-    else
-        printf("node1 is in the SINK set\n");
 
-    delete g;
-
-
-    //update mask
+    for (int k = 0; k < IMAGE_WIDTH*IMAGE_HEIGHT; ++k) {
+        mask.at<uchar>(k) = (g->what_segment(k) == GraphType::SOURCE) ? 255 : 0;
+    }
+    distanceTransform(~mask, distanceImage, CV_DIST_L2, CV_DIST_MASK_PRECISE);
+    imshow("mask", mask);
 
 }

@@ -23,6 +23,8 @@
 
 class prepare {
 
+    typedef Graph<float,float,float> GraphType;
+
     typedef struct {
 
         int row;
@@ -46,7 +48,7 @@ class prepare {
 
 public:
 
-    prepare(const cv::Mat mask);
+    prepare(const cv::Mat _image, const cv::Mat _mask);
 
 
     virtual ~prepare();
@@ -74,7 +76,7 @@ private:
      */
     double computeVariance();
 
-
+    GraphType *g;
 
     cv::Mat image;
     cv::Mat mask;
@@ -92,6 +94,16 @@ private:
 
     unsigned obj[256] = {0};
     unsigned bkg[256] = {0};
+
+    cv::Mat distanceImage;
+
+    //直方图参数
+    int channels = 0;
+    cv::MatND objHist, bkgHist;
+    int dims = 1;
+    int size = 30;
+    float hranges[2] = {0, 180};
+    const float* ranges[1] = {hranges};
 
 };
 
